@@ -1,0 +1,1092 @@
+basePath: /api
+definitions:
+  model.CreateAlumniRequest:
+    description: Request untuk membuat alumni baru
+    properties:
+      alamat:
+        example: Jl. Sudirman No. 1
+        type: string
+      angkatan:
+        example: 2021
+        type: integer
+      email:
+        example: john@example.com
+        type: string
+      jurusan:
+        example: Teknik Informatika
+        type: string
+      nama:
+        example: John Doe
+        type: string
+      nim:
+        example: "21501000"
+        type: string
+      no_telepon:
+        example: "081234567890"
+        type: string
+      tahun_lulus:
+        example: 2025
+        type: integer
+    required:
+    - angkatan
+    - email
+    - jurusan
+    - nama
+    - nim
+    - tahun_lulus
+    type: object
+  model.CreatePekerjaanRequest:
+    description: Request untuk membuat pekerjaan baru
+    properties:
+      alumni_id:
+        type: string
+      bidang_industri:
+        type: string
+      deskripsi_pekerjaan:
+        type: string
+      gaji_range:
+        type: string
+      lokasi_kerja:
+        type: string
+      nama_perusahaan:
+        type: string
+      posisi_jabatan:
+        type: string
+      status_pekerjaan:
+        enum:
+        - aktif
+        - selesai
+        - resigned
+        type: string
+      tanggal_mulai_kerja:
+        $ref: '#/definitions/model.Date'
+      tanggal_selesai_kerja:
+        $ref: '#/definitions/model.Date'
+    required:
+    - alumni_id
+    - bidang_industri
+    - lokasi_kerja
+    - nama_perusahaan
+    - posisi_jabatan
+    - status_pekerjaan
+    - tanggal_mulai_kerja
+    type: object
+  model.Date:
+    properties:
+      time.Time:
+        type: string
+    type: object
+  model.LoginRequest:
+    description: Request untuk login
+    properties:
+      password:
+        example: password123
+        type: string
+      username:
+        example: admin123
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  model.LoginResponse:
+    description: Response setelah login berhasil
+    properties:
+      token:
+        example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+    type: object
+  model.UpdateAlumniRequest:
+    description: Request untuk update data alumni
+    properties:
+      alamat:
+        example: Jl. Merdeka No. 2
+        type: string
+      angkatan:
+        example: 2021
+        type: integer
+      email:
+        example: jane@example.com
+        type: string
+      jurusan:
+        example: Sistem Informasi
+        type: string
+      nama:
+        example: Jane Doe
+        type: string
+      no_telepon:
+        example: "089876543210"
+        type: string
+      tahun_lulus:
+        example: 2025
+        type: integer
+    required:
+    - angkatan
+    - email
+    - jurusan
+    - nama
+    - tahun_lulus
+    type: object
+  model.UpdatePekerjaanRequest:
+    description: Request untuk update data pekerjaan
+    properties:
+      bidang_industri:
+        type: string
+      deskripsi_pekerjaan:
+        type: string
+      gaji_range:
+        type: string
+      lokasi_kerja:
+        type: string
+      nama_perusahaan:
+        type: string
+      posisi_jabatan:
+        type: string
+      status_pekerjaan:
+        enum:
+        - aktif
+        - selesai
+        - resigned
+        type: string
+      tanggal_mulai_kerja:
+        $ref: '#/definitions/model.Date'
+      tanggal_selesai_kerja:
+        $ref: '#/definitions/model.Date'
+    required:
+    - bidang_industri
+    - lokasi_kerja
+    - nama_perusahaan
+    - posisi_jabatan
+    - status_pekerjaan
+    - tanggal_mulai_kerja
+    type: object
+  model.User:
+    description: User data structure
+    properties:
+      created_at:
+        type: string
+      email:
+        example: admin@example.com
+        type: string
+      id:
+        example: 507f1f77bcf86cd799439011
+        type: string
+      passwordHash:
+        type: string
+      role:
+        example: admin
+        type: string
+      username:
+        example: admin123
+        type: string
+    type: object
+host: localhost:3000
+info:
+  contact:
+    name: API Support
+  description: API untuk mengelola data alumni dengan MongoDB menggunakan Clean Architecture
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Alumni Management API
+  version: "1.0"
+paths:
+  /alumni:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil daftar alumni dengan fitur pagination, sorting, dan search
+      parameters:
+      - default: 1
+        description: 'Halaman (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 'Limit per halaman (default: 10, max: 100)'
+        in: query
+        name: limit
+        type: integer
+      - default: created_at
+        description: Sort by field (nim, nama, jurusan, angkatan, tahun_lulus, created_at)
+        in: query
+        name: sortBy
+        type: string
+      - default: desc
+        description: Sort order (asc, desc)
+        in: query
+        name: order
+        type: string
+      - description: Search by nama, nim, atau jurusan
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data alumni dengan pagination
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Dapatkan semua alumni dengan pagination
+      tags:
+      - Alumni
+    post:
+      consumes:
+      - application/json
+      description: Membuat data alumni baru di database (admin only)
+      parameters:
+      - description: Data alumni yang akan dibuat
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreateAlumniRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Alumni berhasil dibuat
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format data tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - ApiKeyAuth: []
+      summary: Buat alumni baru
+      tags:
+      - Alumni
+  /alumni/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Menghapus data alumni berdasarkan ID (admin only)
+      parameters:
+      - description: Alumni ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Alumni berhasil dihapus
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: ID tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Alumni tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - ApiKeyAuth: []
+      summary: Hapus alumni
+      tags:
+      - Alumni
+    get:
+      consumes:
+      - application/json
+      description: Mengambil data alumni spesifik berdasarkan MongoDB Object ID
+      parameters:
+      - description: Alumni ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data alumni
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: ID tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Alumni tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Dapatkan alumni berdasarkan ID
+      tags:
+      - Alumni
+    put:
+      consumes:
+      - application/json
+      description: Memperbarui data alumni berdasarkan ID (admin only)
+      parameters:
+      - description: Alumni ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Data alumni yang diupdate
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.UpdateAlumniRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Alumni berhasil diupdate
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format data tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Alumni tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - ApiKeyAuth: []
+      summary: Update data alumni
+      tags:
+      - Alumni
+  /alumni/all:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil daftar lengkap semua alumni dari database
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Daftar semua alumni
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Dapatkan semua alumni (tanpa pagination)
+      tags:
+      - Alumni
+  /cek-alumni/{key}:
+    post:
+      consumes:
+      - application/x-www-form-urlencoded
+      description: Mengecek apakah seorang mahasiswa (berdasarkan NIM) sudah menjadi
+        alumni
+      parameters:
+      - description: API Key untuk validasi
+        in: path
+        name: key
+        required: true
+        type: string
+      - description: NIM mahasiswa
+        in: formData
+        name: nim
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status alumni dengan data
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: NIM tidak diisi
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Key tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cek apakah mahasiswa adalah alumni
+      tags:
+      - Alumni
+  /login:
+    post:
+      consumes:
+      - application/json
+      description: Melakukan login dengan username/email dan password untuk mendapatkan
+        JWT token
+      parameters:
+      - description: Login credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login berhasil
+          schema:
+            $ref: '#/definitions/model.LoginResponse'
+        "400":
+          description: Request body tidak valid atau field kosong
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Error database atau server
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Login pengguna
+      tags:
+      - Authentication
+  /pekerjaan:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil daftar pekerjaan aktif dengan dukungan pagination, sorting,
+        dan pencarian
+      parameters:
+      - default: 1
+        description: 'Nomor halaman (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 'Jumlah data per halaman (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      - default: created_at
+        description: Field untuk sorting (created_at,nama_perusahaan,posisi_jabatan)
+        in: query
+        name: sortBy
+        type: string
+      - default: desc
+        description: Order sorting (asc/desc)
+        in: query
+        name: order
+        type: string
+      - description: Pencarian berdasarkan nama perusahaan atau posisi
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data pekerjaan berhasil diambil
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Dapatkan semua pekerjaan dengan pagination
+      tags:
+      - Pekerjaan
+    post:
+      consumes:
+      - application/json
+      description: Membuat data pekerjaan baru untuk alumni (hanya admin)
+      parameters:
+      - description: Data pekerjaan baru
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.CreatePekerjaanRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Pekerjaan berhasil ditambahkan
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format data tidak valid atau field kosong
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Buat pekerjaan baru
+      tags:
+      - Pekerjaan
+  /pekerjaan/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Menghapus pekerjaan secara soft delete (hanya admin)
+      parameters:
+      - description: Pekerjaan ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pekerjaan berhasil dihapus
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Hapus pekerjaan (soft delete)
+      tags:
+      - Pekerjaan
+    get:
+      consumes:
+      - application/json
+      description: Mengambil data pekerjaan spesifik berdasarkan ID
+      parameters:
+      - description: Pekerjaan ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data pekerjaan berhasil diambil
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pekerjaan tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Dapatkan detail pekerjaan berdasarkan ID
+      tags:
+      - Pekerjaan
+    put:
+      consumes:
+      - application/json
+      description: Memperbarui data pekerjaan berdasarkan ID (hanya admin)
+      parameters:
+      - description: Pekerjaan ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Data pekerjaan yang diupdate
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/model.UpdatePekerjaanRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pekerjaan berhasil diupdate
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Format data tidak valid atau ID tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Pekerjaan tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Update data pekerjaan
+      tags:
+      - Pekerjaan
+  /pekerjaan/{id}/hard:
+    delete:
+      consumes:
+      - application/json
+      description: Menghapus pekerjaan secara permanen dari database (admin only)
+      parameters:
+      - description: Pekerjaan ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pekerjaan dihapus permanen
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Hapus pekerjaan secara permanen (hard delete)
+      tags:
+      - Pekerjaan
+  /pekerjaan/{id}/restore:
+    patch:
+      consumes:
+      - application/json
+      description: Memulihkan pekerjaan yang telah dihapus (soft delete) (admin only)
+      parameters:
+      - description: Pekerjaan ID (MongoDB ObjectID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Pekerjaan berhasil direstore
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Restore pekerjaan dari trash
+      tags:
+      - Pekerjaan
+  /pekerjaan/alumni/{alumni_id}:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil semua pekerjaan dari alumni tertentu (admin only)
+      parameters:
+      - description: Alumni ID (MongoDB ObjectID)
+        in: path
+        name: alumni_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data pekerjaan alumni berhasil diambil
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Alumni ID tidak valid
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Dapatkan pekerjaan berdasarkan alumni ID
+      tags:
+      - Pekerjaan
+  /pekerjaan/trash:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil daftar pekerjaan yang telah dihapus (soft delete) dengan
+        pagination (admin only)
+      parameters:
+      - default: 1
+        description: 'Nomor halaman (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: 'Jumlah data per halaman (default: 10)'
+        in: query
+        name: limit
+        type: integer
+      - default: created_at
+        description: Field untuk sorting
+        in: query
+        name: sortBy
+        type: string
+      - default: desc
+        description: Order sorting (asc/desc)
+        in: query
+        name: order
+        type: string
+      - description: Pencarian
+        in: query
+        name: search
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data trash pekerjaan berhasil diambil
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden - hanya admin
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Dapatkan pekerjaan yang dihapus (trash)
+      tags:
+      - Pekerjaan
+  /profile:
+    get:
+      consumes:
+      - application/json
+      description: Mengambil data profil pengguna yang sedang login (memerlukan JWT
+        token)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Profil berhasil diambil
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      summary: Dapatkan profil pengguna
+      tags:
+      - Authentication
+  /upload/certificate:
+    delete:
+      consumes:
+      - application/json
+      description: Menghapus sertifikat/ijazah dari user yang sedang login
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Sertifikat berhasil dihapus
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Sertifikat tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Hapus sertifikat/ijazah
+      tags:
+      - Upload
+    get:
+      consumes:
+      - application/json
+      description: Mengambil sertifikat/ijazah dari user yang sedang login
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data sertifikat
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Sertifikat tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Dapatkan sertifikat/ijazah
+      tags:
+      - Upload
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload sertifikat/ijazah alumni (format PDF only, max 2MB)
+      parameters:
+      - description: File sertifikat (PDF only, max 2MB)
+        in: formData
+        name: certificate
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Sertifikat berhasil diupload
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: File tidak valid atau ukuran melebihi batas
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Upload sertifikat/ijazah
+      tags:
+      - Upload
+  /upload/photo:
+    delete:
+      consumes:
+      - application/json
+      description: Menghapus foto profile dari user yang sedang login
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Foto berhasil dihapus
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Foto tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Hapus foto profile
+      tags:
+      - Upload
+    get:
+      consumes:
+      - application/json
+      description: Mengambil foto profile dari user yang sedang login
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Data foto profile
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Foto tidak ditemukan
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Dapatkan foto profile
+      tags:
+      - Upload
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload foto profile alumni (format JPEG/JPG/PNG, max 1MB)
+      parameters:
+      - description: File foto (JPEG/JPG/PNG, max 1MB)
+        in: formData
+        name: photo
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Foto berhasil diupload
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: File tidak valid atau ukuran melebihi batas
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Upload foto profile
+      tags:
+      - Upload
+schemes:
+- http
+- https
+securityDefinitions:
+  Bearer:
+    description: Type "Bearer" followed by a space and JWT token
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
