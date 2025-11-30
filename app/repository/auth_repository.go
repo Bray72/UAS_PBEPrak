@@ -4,7 +4,6 @@ import (
 	"clean-arch/app/model"
 	"database/sql"
 	"errors"
-	
 )
 
 type AuthRepository interface {
@@ -26,7 +25,9 @@ func NewAuthRepository(db *sql.DB) AuthRepository {
 }
 
 func (r *authRepository) GetUserByUsername(username string) (*model.User, error) {
-	user := &model.User{}
+	user := &model.User{
+		Role: &model.Role{},  // Initialize Role to prevent nil pointer
+	}
 	query := `
 		SELECT u.id, u.username, u.email, u.password_hash, u.full_name, 
 		       u.is_active, u.role_id, u.created_at, u.updated_at,
@@ -53,8 +54,9 @@ func (r *authRepository) GetUserByUsername(username string) (*model.User, error)
 }
 
 func (r *authRepository) GetUserByEmail(email string) (*model.User, error) {
-	user := &model.User{}
-	role := &model.Role{}
+	user := &model.User{
+		Role: &model.Role{},  // Initialize Role to prevent nil pointer
+	}
 	query := `
 		SELECT u.id, u.username, u.email, u.password_hash, u.full_name, 
 		       u.is_active, u.role_id, u.created_at, u.updated_at,
@@ -67,7 +69,7 @@ func (r *authRepository) GetUserByEmail(email string) (*model.User, error) {
 	err := r.db.QueryRow(query, email).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.FullName,
 		&user.IsActive, &user.RoleID, &user.CreatedAt, &user.UpdatedAt,
-		&role.ID, &role.Name, &role.Description,
+		&user.Role.ID, &user.Role.Name, &user.Role.Description,
 	)
 
 	if err != nil {
@@ -77,13 +79,13 @@ func (r *authRepository) GetUserByEmail(email string) (*model.User, error) {
 		return nil, err
 	}
 
-	user.Role = role
 	return user, nil
 }
 
 func (r *authRepository) GetUserByID(id string) (*model.User, error) {
-	user := &model.User{}
-	role := &model.Role{}
+	user := &model.User{
+		Role: &model.Role{},  // Initialize Role to prevent nil pointer
+	}
 	query := `
 		SELECT u.id, u.username, u.email, u.password_hash, u.full_name, 
 		       u.is_active, u.role_id, u.created_at, u.updated_at,
@@ -96,7 +98,7 @@ func (r *authRepository) GetUserByID(id string) (*model.User, error) {
 	err := r.db.QueryRow(query, id).Scan(
 		&user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.FullName,
 		&user.IsActive, &user.RoleID, &user.CreatedAt, &user.UpdatedAt,
-		&role.ID, &role.Name, &role.Description,
+		&user.Role.ID, &user.Role.Name, &user.Role.Description,
 	)
 
 	if err != nil {
@@ -106,7 +108,6 @@ func (r *authRepository) GetUserByID(id string) (*model.User, error) {
 		return nil, err
 	}
 
-	user.Role = role
 	return user, nil
 }
 
