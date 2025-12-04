@@ -26,7 +26,7 @@ func SetupUserRoutes(app *fiber.App, userHandler *handler.UserHandler) {
 
 	// All user routes require authentication and admin role
 	usersGroup.Use(middleware.AuthMiddleware)
-	usersGroup.Use(middleware.RoleMiddleware("admin"))
+	usersGroup.Use(middleware.RoleMiddleware("Admin"))
 
 	// User management endpoints
 	usersGroup.Get("/", userHandler.GetAllUsers)

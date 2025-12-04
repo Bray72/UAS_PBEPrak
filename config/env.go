@@ -12,6 +12,8 @@ type Config struct {
 	DBDsn      string
 	JWTSecret  string
 	ApiKey     string
+	MongoURI   string
+	MongoDB    string
 }
 
 var cfg *Config
@@ -35,7 +37,7 @@ func LoadEnv() *Config {
 
 	dbDsn := os.Getenv("DB_DSN")
 	if dbDsn == "" {
-		dbDsn = "postgres://postgres:admin@localhost:5432/uas?sslmode=disable"
+		dbDsn = "postgres://postgres:admin@localhost:5432/uas_db?sslmode=disable"
 	}
 
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -48,11 +50,23 @@ func LoadEnv() *Config {
 		apiKey = "12345"
 	}
 
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017"
+	}
+
+	mongoDB := os.Getenv("MONGO_DB")
+	if mongoDB == "" {
+		mongoDB = "uas_db"
+	}
+
 	cfg = &Config{
-		AppPort:   appPort,
-		DBDsn:     dbDsn,
+		AppPort:  appPort,
+		DBDsn:    dbDsn,
 		JWTSecret: jwtSecret,
 		ApiKey:    apiKey,
+		MongoURI:  mongoURI,
+		MongoDB:   mongoDB,
 	}
 
 	return cfg
