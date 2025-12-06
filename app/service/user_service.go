@@ -4,206 +4,327 @@ import (
 	"clean-arch/app/model"
 	"clean-arch/app/repository"
 	"clean-arch/utils"
+	"database/sql"
 	"errors"
-	"github.com/google/uuid"
 	"regexp"
+	"strconv"
 	"strings"
+
+	"github.com/gofiber/fiber/v2"
 )
 
-type UserService interface {
-	GetAllUsers() ([]*model.UserResponse, error)
-	GetUserByID(id string) (*model.UserResponse, error)
-	CreateUser(req *model.CreateUserRequest) (*model.UserResponse, error)
-	UpdateUser(id string, req *model.UpdateUserRequest) (*model.UserResponse, error)
-	DeleteUser(id string) error
-	AssignRole(userID string, req *model.AssignRoleRequest) (*model.UserResponse, error)
-}
+func GetAllUsersService(c *fiber.Ctx, db *sql.DB) error {
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "10"))
+	sortBy := c.Query("sortBy", "created_at")
+	order := c.Query("order", "desc")
+	search := c.Query("search", "")
 
-type userService struct {
-	repo repository.UserRepository
-}
+	// Validasi dan sanitasi parameters
+	sortByWhitelist := map[string]bool{
+		"id": true, "username": true, "email": true, "full_name": true, "created_at": true,
+	}
+	if !sortByWhitelist[sortBy] {
+		sortBy = "created_at"
+	}
+	if strings.ToLower(order) != "desc" {
+		order = "asc"
+	}
 
-func NewUserService(repo repository.UserRepository) UserService {
-	return &userService{repo: repo}
-}
+	offset := (page - 1) * limit
 
-func (s *userService) GetAllUsers() ([]*model.UserResponse, error) {
-	users, err := s.repo.GetAllUsers()
+	users, err := repository.GetAllUsersWithPagination(db, search, sortBy, order, limit, offset)
 	if err != nil {
-		return nil, err
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to fetch users: " + err.Error(),
+			"code":    500,
+		})
 	}
 
-	var responses []*model.UserResponse
-	for _, user := range users {
-		responses = append(responses, s.userToResponse(user))
-	}
-
-	return responses, nil
-}
-
-func (s *userService) GetUserByID(id string) (*model.UserResponse, error) {
-	user, err := s.repo.GetUserByID(id)
+	total, err := repository.CountUsers(db, search)
 	if err != nil {
-		return nil, err
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to count users: " + err.Error(),
+			"code":    500,
+		})
 	}
 
-	return s.userToResponse(user), nil
+	totalPages := (total + limit - 1) / limit
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Users fetched successfully",
+		"data":    users,
+		"meta": fiber.Map{
+			"page":   page,
+			"limit":  limit,
+			"total":  total,
+			"pages":  totalPages,
+			"sortBy": sortBy,
+			"order":  order,
+			"search": search,
+		},
+		"code": 200,
+	})
 }
 
-func (s *userService) CreateUser(req *model.CreateUserRequest) (*model.UserResponse, error) {
-	// Validate input
-	if err := s.validateCreateUserRequest(req); err != nil {
-		return nil, err
+func GetUserByIDService(c *fiber.Ctx, db *sql.DB) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "User ID is required",
+			"code":    400,
+		})
 	}
 
-	// Check if username already exists
-	existingUser, _ := s.repo.GetUserByUsername(req.Username)
-	if existingUser != nil {
-		return nil, errors.New("username already exists")
+	user, err := repository.GetUserByID(db, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"status":  "error",
+				"message": "User not found",
+				"code":    404,
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to fetch user: " + err.Error(),
+			"code":    500,
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "User fetched successfully",
+		"data":    user,
+		"code":    200,
+	})
+}
+
+func CreateUserService(c *fiber.Ctx, db *sql.DB) error {
+	req := new(model.CreateUserRequest)
+	if err := c.BodyParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Invalid request body",
+			"code":    400,
+		})
+	}
+
+	// Validasi input
+	if err := validateCreateUserRequest(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": err.Error(),
+			"code":    400,
+		})
+	}
+
+	// Cek username sudah ada
+	existing, _ := repository.GetUserByUsername(db, req.Username)
+	if existing != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Username already exists",
+			"code":    400,
+		})
 	}
 
 	// Hash password
 	hashedPassword, err := utils.HashPassword(req.Password)
 	if err != nil {
-		return nil, errors.New("failed to process password")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to process password",
+			"code":    500,
+		})
 	}
 
-	// Parse role ID
-	roleID, err := uuid.Parse(req.RoleID)
+	user, err := repository.CreateUser(db, req, hashedPassword)
 	if err != nil {
-		return nil, errors.New("invalid role id format")
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to create user: " + err.Error(),
+			"code":    500,
+		})
 	}
 
-	// Create user
-	user := &model.User{
-		Username:     req.Username,
-		Email:        strings.ToLower(req.Email),
-		PasswordHash: hashedPassword,
-		FullName:     req.FullName,
-		RoleID:       roleID,
-		IsActive:     true,
-	}
-
-	createdUser, err := s.repo.CreateUser(user)
-	if err != nil {
-		return nil, errors.New("failed to create user")
-	}
-
-	// Get user with role data
-	userWithRole, err := s.repo.GetUserByID(createdUser.ID.String())
-	if err != nil {
-		return nil, err
-	}
-
-	return s.userToResponse(userWithRole), nil
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"status":  "success",
+		"message": "User created successfully",
+		"data":    user,
+		"code":    201,
+	})
 }
 
-func (s *userService) UpdateUser(id string, req *model.UpdateUserRequest) (*model.UserResponse, error) {
-	// Get existing user
-	existingUser, err := s.repo.GetUserByID(id)
+func UpdateUserService(c *fiber.Ctx, db *sql.DB) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "User ID is required",
+			"code":    400,
+		})
+	}
+
+	req := new(model.UpdateUserRequest)
+	if err := c.BodyParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Invalid request body",
+			"code":    400,
+		})
+	}
+
+	// Validasi input
+	if err := validateUpdateUserRequest(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": err.Error(),
+			"code":    400,
+		})
+	}
+
+	user, err := repository.UpdateUser(db, id, req)
 	if err != nil {
-		return nil, err
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"status":  "error",
+				"message": "User not found",
+				"code":    404,
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to update user: " + err.Error(),
+			"code":    500,
+		})
 	}
 
-	// Validate input
-	if err := s.validateUpdateUserRequest(req); err != nil {
-		return nil, err
-	}
-
-	// Update fields
-	existingUser.Username = req.Username
-	existingUser.Email = strings.ToLower(req.Email)
-	existingUser.FullName = req.FullName
-	existingUser.IsActive = req.IsActive
-
-	// Update user
-	if err := s.repo.UpdateUser(existingUser); err != nil {
-		return nil, errors.New("failed to update user")
-	}
-
-	// Get updated user with role data
-	updatedUser, err := s.repo.GetUserByID(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.userToResponse(updatedUser), nil
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "User updated successfully",
+		"data":    user,
+		"code":    200,
+	})
 }
 
-func (s *userService) DeleteUser(id string) error {
-	// Check if user exists
-	_, err := s.repo.GetUserByID(id)
-	if err != nil {
-		return err
+func DeleteUserService(c *fiber.Ctx, db *sql.DB) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "User ID is required",
+			"code":    400,
+		})
 	}
 
-	return s.repo.DeleteUser(id)
+	err := repository.DeleteUser(db, id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"status":  "error",
+				"message": "User not found",
+				"code":    404,
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Failed to delete user: " + err.Error(),
+			"code":    500,
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "User deleted successfully",
+		"code":    200,
+	})
 }
 
-func (s *userService) AssignRole(userID string, req *model.AssignRoleRequest) (*model.UserResponse, error) {
-	// Check if user exists
-	_, err := s.repo.GetUserByID(userID)
-	if err != nil {
-		return nil, err
+func AssignRoleService(c *fiber.Ctx, db *sql.DB) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "User ID is required",
+			"code":    400,
+		})
 	}
 
-	// Validate role ID format
-	_, err = uuid.Parse(req.RoleID)
-	if err != nil {
-		return nil, errors.New("invalid role id format")
-	}
-
-	// Update user role
-	if err := s.repo.UpdateUserRole(userID, req.RoleID); err != nil {
-		return nil, err
-	}
-
-	// Get updated user
-	user, err := s.repo.GetUserByID(userID)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.userToResponse(user), nil
-}
-
-func (s *userService) validateCreateUserRequest(req *model.CreateUserRequest) error {
-	if req.Username == "" || len(req.Username) < 3 {
-		return errors.New("username must be at least 3 characters")
-	}
-
-	if req.Email == "" || !isValidEmail(req.Email) {
-		return errors.New("invalid email format")
-	}
-
-	if req.Password == "" || len(req.Password) < 6 {
-		return errors.New("password must be at least 6 characters")
-	}
-
-	if req.FullName == "" {
-		return errors.New("full name is required")
+	req := new(model.AssignRoleRequest)
+	if err := c.BodyParser(req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Invalid request body",
+			"code":    400,
+		})
 	}
 
 	if req.RoleID == "" {
-		return errors.New("role id is required")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "Role ID is required",
+			"code":    400,
+		})
 	}
 
-	return nil
+	user, err := repository.AssignRole(db, id, req.RoleID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"status":  "error",
+				"message": "User not found",
+				"code":    404,
+			})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": err.Error(),
+			"code":    400,
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"status":  "success",
+		"message": "Role assigned successfully",
+		"data":    user,
+		"code":    200,
+	})
 }
 
-func (s *userService) validateUpdateUserRequest(req *model.UpdateUserRequest) error {
+func validateCreateUserRequest(req *model.CreateUserRequest) error {
 	if req.Username == "" || len(req.Username) < 3 {
 		return errors.New("username must be at least 3 characters")
 	}
-
 	if req.Email == "" || !isValidEmail(req.Email) {
 		return errors.New("invalid email format")
 	}
-
+	if req.Password == "" || len(req.Password) < 6 {
+		return errors.New("password must be at least 6 characters")
+	}
 	if req.FullName == "" {
 		return errors.New("full name is required")
 	}
+	if req.RoleID == "" {
+		return errors.New("role id is required")
+	}
+	return nil
+}
 
+func validateUpdateUserRequest(req *model.UpdateUserRequest) error {
+	if req.Username == "" || len(req.Username) < 3 {
+		return errors.New("username must be at least 3 characters")
+	}
+	if req.Email == "" || !isValidEmail(req.Email) {
+		return errors.New("invalid email format")
+	}
+	if req.FullName == "" {
+		return errors.New("full name is required")
+	}
 	return nil
 }
 
@@ -211,18 +332,4 @@ func isValidEmail(email string) bool {
 	pattern := `^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`
 	re := regexp.MustCompile(pattern)
 	return re.MatchString(email)
-}
-
-func (s *userService) userToResponse(user *model.User) *model.UserResponse {
-	resp := &model.UserResponse{
-		ID:        user.ID.String(),
-		Username:  user.Username,
-		Email:     user.Email,
-		FullName:  user.FullName,
-		IsActive:  user.IsActive,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-	}
-
-	return resp
 }

@@ -83,11 +83,6 @@ func (s *authService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 		}, err
 	}
 
-	roleName := ""
-	if user.Role != nil {
-		roleName = user.Role.Name
-	}
-
 	return &model.LoginResponse{
 		Status: "success",
 		Data: &model.LoginData{
@@ -98,7 +93,6 @@ func (s *authService) Login(req *model.LoginRequest) (*model.LoginResponse, erro
 				Username:    user.Username,
 				Email:       user.Email,
 				FullName:    user.FullName,
-				Role:        roleName,
 				Permissions: permissions,
 				IsActive:    user.IsActive,
 				CreatedAt:   user.CreatedAt,
@@ -175,9 +169,6 @@ func (s *authService) Register(req *model.RegisterRequest) (*model.RegisterRespo
 	// Get permissions
 	permissions, _ := s.repo.GetUserPermissions(createdUser.ID.String())
 
-	// Get role details
-	role, _ := s.repo.GetRoleByID(req.RoleID)
-
 	return &model.RegisterResponse{
 		Status: "success",
 		Data: &model.UserResponse{
@@ -185,7 +176,6 @@ func (s *authService) Register(req *model.RegisterRequest) (*model.RegisterRespo
 			Username:    createdUser.Username,
 			Email:       createdUser.Email,
 			FullName:    createdUser.FullName,
-			Role:        role.Name,
 			Permissions: permissions,
 			IsActive:    createdUser.IsActive,
 			CreatedAt:   createdUser.CreatedAt,
@@ -206,11 +196,6 @@ func (s *authService) GetProfile(userID string) (*model.ProfileResponse, error) 
 
 	permissions, _ := s.repo.GetUserPermissions(userID)
 
-	roleName := ""
-	if user.Role != nil {
-		roleName = user.Role.Name
-	}
-
 	return &model.ProfileResponse{
 		Status: "success",
 		Data: &model.UserResponse{
@@ -218,7 +203,6 @@ func (s *authService) GetProfile(userID string) (*model.ProfileResponse, error) 
 			Username:    user.Username,
 			Email:       user.Email,
 			FullName:    user.FullName,
-			Role:        roleName,
 			Permissions: permissions,
 			IsActive:    user.IsActive,
 			CreatedAt:   user.CreatedAt,

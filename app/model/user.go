@@ -26,12 +26,6 @@ type AssignRoleRequest struct {
 	RoleID string `json:"role_id" validate:"required,uuid"`
 }
 
-// RoleData represents role information in response
-type RoleData struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
 
 // ListUsersResponse represents list of users response
 type ListUsersResponse struct {

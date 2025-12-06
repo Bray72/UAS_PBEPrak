@@ -1,12 +1,8 @@
 package main
 
 import (
-	"clean-arch/app/handler"
-	"clean-arch/app/repository"
-	"clean-arch/app/service"
 	"clean-arch/config"
 	"clean-arch/database"
-	"clean-arch/route"
 	"log"
  	_ "github.com/lib/pq"
 	"github.com/gofiber/fiber/v2"
@@ -30,17 +26,6 @@ func main() {
 		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders: "Content-Type,Authorization",
 	}))
-
-	authRepo := repository.NewAuthRepository(db)
-	authService := service.NewAuthService(authRepo)
-	authHandler := handler.NewAuthHandler(authService)
-
-	userRepo := repository.NewUserRepository(db)
-	userService := service.NewUserService(userRepo)
-	userHandler := handler.NewUserHandler(userService)
-
-
-	routes.SetupRoutes(app, authHandler, userHandler)
 
 	port := env.AppPort
 	log.Printf("🚀 Server starting on http://localhost:%s\n", port)

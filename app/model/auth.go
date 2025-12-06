@@ -60,15 +60,21 @@ type RegisterResponse struct {
 }
 
 type UserResponse struct {
-	ID          string   `json:"id"`
-	Username    string   `json:"username"`
-	Email       string   `json:"email"`
-	FullName    string   `json:"full_name"`
-	Role        string   `json:"role"`
-	Permissions []string `json:"permissions"`
-	IsActive    bool     `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string       `json:"id"`
+	Username    string       `json:"username"`
+	Email       string       `json:"email"`
+	FullName    string       `json:"full_name"`
+	Role        *RoleData    `json:"role"` // Changed from string to *RoleData pointer
+	Permissions []string     `json:"permissions"`
+	IsActive    bool         `json:"is_active"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+}
+
+type RoleData struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 type JWTClaims struct {
