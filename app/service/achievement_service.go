@@ -1,225 +1,389 @@
 package service
 
 import (
-	"clean-arch/app/model"
-	"clean-arch/app/repository"
+	"context"
 	"errors"
 	"time"
+
+	mongoModel "clean-arch/app/model/mongo"
+	pgModel "clean-arch/app/model/postgre"
+	mongoRepo "clean-arch/app/repository/mongo"
+	pgRepo "clean-arch/app/repository/postgre"
 
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-type AchievementService interface {
-	GetAchievementsByUserID(userID string) ([]*model.AchievementResponse, error)
-	GetAchievementByID(id string) (*model.AchievementResponse, error)
-	CreateAchievement(userID string, req *model.CreateAchievementRequest) (*model.AchievementResponse, error)
-	UpdateAchievement(id string, userID string, req *model.UpdateAchievementRequest) (*model.AchievementResponse, error)
-	DeleteAchievement(id string, userID string) error
-	SubmitAchievement(id string, userID string, req *model.SubmitAchievementRequest) (*model.AchievementResponse, error)
+// AchievementService orchestrates Mongo + Postgres for achievements, and writes activity logs.
+type AchievementService struct {
+	achievementMongo mongoRepo.AchievementRepository
+	achievementRefPG pgRepo.AchievementRefRepository
+	studentRepo      pgRepo.StudentRepository
+	userRepo         pgRepo.UserRepository
+	activityRepo     pgRepo.ActivityLogRepository
 }
 
-type achievementService struct {
-	repo repository.AchievementRepository
+// NewAchievementService creates an instance of AchievementService.
+// NOTE: activityRepo can be nil if you don't want logging (but recommended to provide).
+func NewAchievementService(
+	achievementMongo mongoRepo.AchievementRepository,
+	achievementRefPG pgRepo.AchievementRefRepository,
+	studentRepo pgRepo.StudentRepository,
+	userRepo pgRepo.UserRepository,
+	activityRepo pgRepo.ActivityLogRepository,
+) *AchievementService {
+	return &AchievementService{
+		achievementMongo: achievementMongo,
+		achievementRefPG: achievementRefPG,
+		studentRepo:      studentRepo,
+		userRepo:         userRepo,
+		activityRepo:     activityRepo,
+	}
 }
 
-func NewAchievementService(repo repository.AchievementRepository) AchievementService {
-	return &achievementService{repo: repo}
+// helper: create activity log best-effort
+func (s *AchievementService) writeActivityLog(ctx context.Context, logEntry *pgModel.ActivityLog) {
+	if s.activityRepo == nil || logEntry == nil {
+		return
+	}
+	// do not propagate error to caller; best-effort
+	_ = s.activityRepo.Create(ctx, logEntry)
 }
 
-func (s *achievementService) GetAchievementsByUserID(userID string) ([]*model.AchievementResponse, error) {
-	achievements, err := s.repo.GetAchievementsByUserID(userID)
+// CreateDraft saves achievement doc to Mongo and creates a reference row in Postgres (status=draft)
+func (s *AchievementService) CreateDraft(ctx context.Context, userID string, doc *mongoModel.Achievement) (*pgModel.AchievementReference, error) {
+	// 1. validate student
+	student, err := s.studentRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if student == nil {
+		return nil, errors.New("student profile not found")
+	}
+
+	// 2. save to mongo
+	doc.StudentID = student.ID
+	oid, err := s.achievementMongo.Create(ctx, doc)
 	if err != nil {
 		return nil, err
 	}
 
-	var responses []*model.AchievementResponse
-	for _, achievement := range achievements {
-		responses = append(responses, s.achievementToResponse(achievement))
+	// 3. create reference in postgres
+	ref := &pgModel.AchievementReference{
+		ID:                 uuid.New().String(),
+		StudentID:          student.ID,
+		MongoAchievementID: oid.Hex(),
+		Status:             "draft",
+		CreatedAt:          time.Now(),
+		UpdatedAt:          time.Now(),
 	}
 
-	return responses, nil
-}
-
-func (s *achievementService) GetAchievementByID(id string) (*model.AchievementResponse, error) {
-	achievement, err := s.repo.GetAchievementByID(id)
-	if err != nil {
+	if err := s.achievementRefPG.Create(ctx, ref); err != nil {
+		// cleanup mongo doc best-effort
+		_ = s.achievementMongo.SoftDelete(ctx, oid)
 		return nil, err
 	}
 
-	return s.achievementToResponse(achievement), nil
-}
-
-func (s *achievementService) CreateAchievement(userID string, req *model.CreateAchievementRequest) (*model.AchievementResponse, error) {
-	// Validate input
-	if err := s.validateCreateRequest(req); err != nil {
-		return nil, err
-	}
-
-	achievement := &model.Achievement{
-		ID:          primitive.NewObjectID(),
-		UserID:      userID,
-		Title:       req.Title,
-		Description: req.Description,
-		Document:    req.Document,
-		Status:      "draft",
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
-
-	createdAchievement, err := s.repo.CreateAchievement(achievement)
-	if err != nil {
-		return nil, errors.New("failed to create achievement")
-	}
-
-	// Create reference in PostgreSQL
-	pgRef := &model.AchievementPostgres{
-		ID:        uuid.New(),
-		UserID:    uuid.MustParse(userID),
-		MongoID:   createdAchievement.ID.Hex(),
-		Title:     createdAchievement.Title,
-		Status:    "draft",
+	// 4. write activity log (created)
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "created",
+		ActorID:    &userID,
+		Previous:   nil,
+		Current: map[string]interface{}{
+			"status":               ref.Status,
+			"mongo_achievement_id": ref.MongoAchievementID,
+		},
 		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
 	}
+	s.writeActivityLog(ctx, logEntry)
 
-	_ = s.repo.CreateAchievementReference(pgRef)
-
-	return s.achievementToResponse(createdAchievement), nil
+	return ref, nil
 }
 
-func (s *achievementService) UpdateAchievement(id string, userID string, req *model.UpdateAchievementRequest) (*model.AchievementResponse, error) {
-	// Get existing achievement
-	existingAchievement, err := s.repo.GetAchievementByID(id)
-	if err != nil {
-		return nil, err
-	}
-
-	// Check ownership
-	if existingAchievement.UserID != userID {
-		return nil, errors.New("unauthorized")
-	}
-
-	// Only draft can be updated
-	if existingAchievement.Status != "draft" {
-		return nil, errors.New("only draft achievement can be updated")
-	}
-
-	// Validate input
-	if err := s.validateUpdateRequest(req); err != nil {
-		return nil, err
-	}
-
-	// Update fields
-	existingAchievement.Title = req.Title
-	existingAchievement.Description = req.Description
-	existingAchievement.Document = req.Document
-	existingAchievement.UpdatedAt = time.Now()
-
-	if err := s.repo.UpdateAchievement(id, existingAchievement); err != nil {
-		return nil, err
-	}
-
-	// Get updated achievement
-	updatedAchievement, err := s.repo.GetAchievementByID(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.achievementToResponse(updatedAchievement), nil
-}
-
-func (s *achievementService) DeleteAchievement(id string, userID string) error {
-	// Get achievement
-	achievement, err := s.repo.GetAchievementByID(id)
+// Submit transitions draft -> submitted
+func (s *AchievementService) Submit(ctx context.Context, refID string, userID string) error {
+	// validate student
+	student, err := s.studentRepo.GetByUserID(ctx, userID)
 	if err != nil {
 		return err
 	}
-
-	// Check ownership
-	if achievement.UserID != userID {
-		return errors.New("unauthorized")
+	if student == nil {
+		return errors.New("student not found")
 	}
 
-	// Only draft can be deleted
-	if achievement.Status != "draft" {
-		return errors.New("only draft achievement can be deleted")
-	}
-
-	return s.repo.DeleteAchievement(id)
-}
-
-func (s *achievementService) SubmitAchievement(id string, userID string, req *model.SubmitAchievementRequest) (*model.AchievementResponse, error) {
-	// Get achievement
-	achievement, err := s.repo.GetAchievementByID(id)
+	// get reference
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	if ref == nil {
+		return errors.New("achievement reference not found")
+	}
+	if ref.StudentID != student.ID {
+		return errors.New("not owner")
+	}
+	if ref.Status != "draft" {
+		return errors.New("invalid status transition: only draft can be submitted")
 	}
 
-	// Check ownership
-	if achievement.UserID != userID {
-		return nil, errors.New("unauthorized")
+	// update status
+	now := time.Now()
+	ref.SubmittedAt = &now
+	if err := s.achievementRefPG.UpdateStatus(ctx, refID, "submitted", nil); err != nil {
+		return err
 	}
 
-	// Submit
-	if err := s.repo.SubmitAchievement(id, userID); err != nil {
-		return nil, err
+	// activity log
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "status_changed",
+		ActorID:    &userID,
+		Previous:   map[string]interface{}{"status": "draft"},
+		Current:    map[string]interface{}{"status": "submitted", "submitted_at": now},
+		CreatedAt:  time.Now(),
 	}
-
-	// Update PostgreSQL status
-	_ = s.repo.UpdateAchievementStatus(id, "submitted")
-
-	// Get updated achievement
-	updatedAchievement, err := s.repo.GetAchievementByID(id)
-	if err != nil {
-		return nil, err
-	}
-
-	return s.achievementToResponse(updatedAchievement), nil
-}
-
-func (s *achievementService) validateCreateRequest(req *model.CreateAchievementRequest) error {
-	if req.Title == "" || len(req.Title) < 3 {
-		return errors.New("title must be at least 3 characters")
-	}
-
-	if req.Description == "" || len(req.Description) < 10 {
-		return errors.New("description must be at least 10 characters")
-	}
-
-	if req.Document == "" {
-		return errors.New("document is required")
-	}
-
+	s.writeActivityLog(ctx, logEntry)
 	return nil
 }
 
-func (s *achievementService) validateUpdateRequest(req *model.UpdateAchievementRequest) error {
-	if req.Title == "" || len(req.Title) < 3 {
-		return errors.New("title must be at least 3 characters")
+// Verify transitions submitted -> verified
+func (s *AchievementService) Verify(ctx context.Context, refID string, verifierUserID string) error {
+	// verifier existence check
+	verifier, err := s.userRepo.GetByID(ctx, verifierUserID)
+	if err != nil {
+		return err
+	}
+	if verifier == nil {
+		return errors.New("verifier user not found")
 	}
 
-	if req.Description == "" || len(req.Description) < 10 {
-		return errors.New("description must be at least 10 characters")
+	// get reference
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return errors.New("achievement reference not found")
+	}
+	if ref.Status != "submitted" {
+		return errors.New("only submitted achievements can be verified")
 	}
 
-	if req.Document == "" {
-		return errors.New("document is required")
+	// update status in db (use UpdateStatus which sets verified_by & verified_at when provided)
+	if err := s.achievementRefPG.UpdateStatus(ctx, refID, "verified", &verifierUserID); err != nil {
+		return err
 	}
 
+	// activity log
+	now := time.Now()
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "status_changed",
+		ActorID:    &verifierUserID,
+		ActorRole:  nil, // optional: you can fetch role name if needed
+		Previous:   map[string]interface{}{"status": "submitted"},
+		Current:    map[string]interface{}{"status": "verified", "verified_at": now, "verified_by": verifierUserID},
+		CreatedAt:  time.Now(),
+	}
+	s.writeActivityLog(ctx, logEntry)
 	return nil
 }
 
-func (s *achievementService) achievementToResponse(achievement *model.Achievement) *model.AchievementResponse {
-	return &model.AchievementResponse{
-		ID:          achievement.ID.Hex(),
-		UserID:      achievement.UserID,
-		Title:       achievement.Title,
-		Description: achievement.Description,
-		Document:    achievement.Document,
-		Status:      achievement.Status,
-		SubmitDate:  achievement.SubmitDate,
-		CreatedAt:   achievement.CreatedAt,
-		UpdatedAt:   achievement.UpdatedAt,
+// Reject sets status to rejected and saves rejection note
+func (s *AchievementService) Reject(ctx context.Context, refID string, verifierUserID string, note string) error {
+	// verifier existence check
+	verifier, err := s.userRepo.GetByID(ctx, verifierUserID)
+	if err != nil {
+		return err
 	}
+	if verifier == nil {
+		return errors.New("verifier user not found")
+	}
+
+	// get reference
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return errors.New("achievement reference not found")
+	}
+	if ref.Status != "submitted" {
+		return errors.New("only submitted achievements can be rejected")
+	}
+
+	// update rejection note and status
+	if err := s.achievementRefPG.UpdateRejectionNote(ctx, refID, note); err != nil {
+		return err
+	}
+
+	// activity log
+	now := time.Now()
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "status_changed",
+		ActorID:    &verifierUserID,
+		Previous:   map[string]interface{}{"status": "submitted"},
+		Current:    map[string]interface{}{"status": "rejected", "rejection_note": note, "rejected_at": now},
+		CreatedAt:  time.Now(),
+	}
+	s.writeActivityLog(ctx, logEntry)
+	return nil
+}
+
+// DeleteDraft: soft delete in Mongo + update reference in Postgres to 'deleted' (only owner, only draft)
+func (s *AchievementService) DeleteDraft(ctx context.Context, refID string, userID string) error {
+	// validate student
+	student, err := s.studentRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if student == nil {
+		return errors.New("student not found")
+	}
+
+	// get reference
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return errors.New("achievement reference not found")
+	}
+	if ref.StudentID != student.ID {
+		return errors.New("not owner")
+	}
+	if ref.Status != "draft" {
+		return errors.New("only draft achievements can be deleted")
+	}
+
+	// soft delete mongo doc
+	oid, err := primitive.ObjectIDFromHex(ref.MongoAchievementID)
+	if err != nil {
+		// still update postgres to deleted for safety
+		_ = s.achievementRefPG.UpdateStatus(ctx, refID, "deleted", nil)
+		return errors.New("invalid mongo object id")
+	}
+	if err := s.achievementMongo.SoftDelete(ctx, oid); err != nil {
+		// continue to update postgres anyway (best-effort)
+	}
+
+	// update postgres reference status to deleted
+	if err := s.achievementRefPG.UpdateStatus(ctx, refID, "deleted", nil); err != nil {
+		return err
+	}
+
+	// activity log
+	now := time.Now()
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "deleted",
+		ActorID:    &userID,
+		Previous:   map[string]interface{}{"status": "draft"},
+		Current:    map[string]interface{}{"status": "deleted", "deleted_at": now},
+		CreatedAt:  time.Now(),
+	}
+	s.writeActivityLog(ctx, logEntry)
+	return nil
+}
+
+// GetDetail returns both Mongo document and Postgres reference
+func (s *AchievementService) GetDetail(ctx context.Context, refID string) (*mongoModel.Achievement, *pgModel.AchievementReference, error) {
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ref == nil {
+		return nil, nil, errors.New("reference not found")
+	}
+	oid, err := primitive.ObjectIDFromHex(ref.MongoAchievementID)
+	if err != nil {
+		return nil, nil, errors.New("invalid mongo id stored in reference")
+	}
+	ach, err := s.achievementMongo.GetByID(ctx, oid)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ach, ref, nil
+}
+
+// ListByStudent returns all achievements for a student
+func (s *AchievementService) ListByStudent(ctx context.Context, studentID string) ([]*pgModel.AchievementReference, error) {
+	return s.achievementRefPG.ListByStudent(ctx, studentID)
+}
+
+func (s *AchievementService) GetAllAchievements(ctx context.Context, filters map[string]interface{}) ([]*pgModel.AchievementReference, error) {
+    // Saat ini repo hanya punya ListAll tanpa filter dinamis, 
+    // Anda bisa update repository untuk menerima filter, atau ambil semua dulu (jika data sedikit).
+    return s.achievementRefPG.ListAll(ctx)
+}
+
+func (s *AchievementService) UpdateDraft(ctx context.Context, refID string, userID string, updates map[string]interface{}) error {
+	// validate student
+	student, err := s.studentRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if student == nil {
+		return errors.New("student not found")
+	}
+
+	// get reference
+	ref, err := s.achievementRefPG.GetByID(ctx, refID)
+	if err != nil {
+		return err
+	}
+	if ref == nil {
+		return errors.New("achievement reference not found")
+	}
+	if ref.StudentID != student.ID {
+		return errors.New("not owner")
+	}
+	if ref.Status != "draft" {
+		return errors.New("only draft achievements can be updated")
+	}
+
+	// update MongoDB document
+	oid, err := primitive.ObjectIDFromHex(ref.MongoAchievementID)
+if err != nil {
+    return errors.New("invalid mongo object id")
+}
+
+// Update MongoDB
+if err := s.achievementMongo.Update(ctx, oid, updates); err != nil {
+    return err
+}
+
+// Update Timestamp Postgres
+ref.UpdatedAt = time.Now()
+if err := s.achievementRefPG.Update(ctx, ref); err != nil {
+    return err
+}
+
+	// activity log
+	logEntry := &pgModel.ActivityLog{
+		ID:         uuid.New().String(),
+		EntityType: "achievement_reference",
+		EntityID:   ref.ID,
+		EventType:  "updated",
+		ActorID:    &userID,
+		Previous:   nil,
+		Current:    updates,
+		CreatedAt:  time.Now(),
+	}
+	s.writeActivityLog(ctx, logEntry)
+
+	
+	return nil
 }

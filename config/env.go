@@ -3,71 +3,63 @@ package config
 import (
 	"log"
 	"os"
+	"sync"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	AppPort    string
-	DBDsn      string
-	JWTSecret  string
-	ApiKey     string
-	MongoURI   string
-	MongoDB    string
+	AppPort     string
+	DBDriver    string
+	PostgresDsn string
+	MongoURI    string
+	JWTSecret   string
+	LogPath     string
+	LogLevel    string
 }
 
-var cfg *Config
+// singleton config
+var (
+	cfg  *Config
+	once sync.Once
+)
 
-func LoadEnv() *Config {
-	if cfg != nil {
-		return cfg
+// LoadEnv reads .env (if present) and environment variables.
+// Call this once at startup (or call Get() which ensures LoadEnv ran).
+func LoadEnv() error {
+	var loadErr error
+	once.Do(func() {
+		// try load .env silently
+		_ = godotenv.Load()
+
+		c := &Config{
+			AppPort:     getEnv("APP_PORT", "3000"),
+			DBDriver:    getEnv("DB_DRIVER", "mongo"), // mongo or postgres
+			PostgresDsn: getEnv("POSTGRES_DSN", ""),
+			MongoURI:    getEnv("MONGO_URI", ""),
+			JWTSecret:   getEnv("JWT_SECRET", "dev-secret"),
+			LogPath:     getEnv("LOG_PATH", "logs/app.log"),
+			LogLevel:    getEnv("LOG_LEVEL", "info"),
+		}
+		cfg = c
+	})
+	return loadErr
+}
+
+// Get returns loaded config. It ensures LoadEnv was called.
+func Get() *Config {
+	if cfg == nil {
+		if err := LoadEnv(); err != nil {
+			log.Printf("warning: LoadEnv returned error: %v", err)
+		}
 	}
-
-	// Coba load .env
-	err := godotenv.Load()
-	if err != nil {
-		log.Println("⚠️  .env file not found, using system environment variables")
-	}
-
-	// Load or set default values
-	appPort := os.Getenv("APP_PORT")
-	if appPort == "" {
-		appPort = "3000"
-	}
-
-	dbDsn := os.Getenv("DB_DSN")
-	if dbDsn == "" {
-		dbDsn = "postgres://postgres:admin@localhost:5432/uas_db?sslmode=disable"
-	}
-
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "your-secret-key-min-32-characters-long-for-security"
-	}
-
-	apiKey := os.Getenv("API_KEY")
-	if apiKey == "" {
-		apiKey = "12345"
-	}
-
-	mongoURI := os.Getenv("MONGO_URI")
-	if mongoURI == "" {
-		mongoURI = "mongodb://localhost:27017"
-	}
-
-	mongoDB := os.Getenv("MONGO_DB")
-	if mongoDB == "" {
-		mongoDB = "uas_db"
-	}
-
-	cfg = &Config{
-		AppPort:  appPort,
-		DBDsn:    dbDsn,
-		JWTSecret: jwtSecret,
-		ApiKey:    apiKey,
-		MongoURI:  mongoURI,
-		MongoDB:   mongoDB,
-	}
-
 	return cfg
+}
+
+func getEnv(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
 }

@@ -1,30 +1,62 @@
 package utils
 
 import (
-	"github.com/gofiber/fiber/v2"
+	"encoding/json"
+	"net/http"
 )
 
-// Response adalah struktur standar untuk semua API response
-type Response struct {
-	Status  int         `json:"status"`
+// ApiResponse adalah response standard untuk semua endpoint
+type ApiResponse struct {
+	Success bool        `json:"success"`
+	Code    int         `json:"code"`
 	Message string      `json:"message"`
 	Data    interface{} `json:"data,omitempty"`
+	Error   interface{} `json:"error,omitempty"`
 }
 
-// SuccessResponse mengirim response sukses
-func SuccessResponse(c *fiber.Ctx, statusCode int, message string, data interface{}) error {
-	return c.Status(statusCode).JSON(Response{
-		Status:  statusCode,
+// SuccessResponse mengirim response success
+func SuccessResponse(w http.ResponseWriter, code int, message string, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(ApiResponse{
+		Success: true,
+		Code:    code,
 		Message: message,
 		Data:    data,
 	})
 }
 
 // ErrorResponse mengirim response error
-func ErrorResponse(c *fiber.Ctx, statusCode int, message string, data interface{}) error {
-	return c.Status(statusCode).JSON(Response{
-		Status:  statusCode,
+func ErrorResponse(w http.ResponseWriter, code int, message string, err interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(ApiResponse{
+		Success: false,
+		Code:    code,
 		Message: message,
-		Data:    data,
+		Error:   err,
 	})
+}
+
+// ExtractUserFromContext mengambil user claims dari JWT
+func ExtractUserFromContext(r *http.Request) map[string]interface{} {
+	ctx := r.Context()
+	user, ok := ctx.Value("user").(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	return user
+}
+
+// ExtractRoleFromContext mengambil role dari JWT
+func ExtractRoleFromContext(r *http.Request) string {
+	user := ExtractUserFromContext(r)
+	if user == nil {
+		return ""
+	}
+	role, ok := user["role"].(string)
+	if !ok {
+		return ""
+	}
+	return role
 }
