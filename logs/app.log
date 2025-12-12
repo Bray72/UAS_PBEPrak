@@ -1,0 +1,4 @@
+12-Dec-2025 13:22:05 | 404 | POST /auth/login - 127.0.0.1 -      5.8791ms
+12-Dec-2025 13:22:41 | 200 | POST /api/v1/auth/login - 127.0.0.1 -    300.1603ms
+12-Dec-2025 13:28:51 | 401 | POST /api/v1/auth/logout - 127.0.0.1 -      1.9372ms
+12-Dec-2025 13:28:59 | 200 | POST /api/v1/auth/login - 127.0.0.1 -    348.3929ms
